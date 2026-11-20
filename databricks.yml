@@ -1,0 +1,43 @@
+bundle:
+  name: genie-code-unit-cost-benchmarks
+
+include:
+  - resources/*.yml
+
+variables:
+  catalog:
+    description: Unity Catalog catalog that holds the benchmark schema (required; set per target or with --var / BUNDLE_VAR_catalog)
+  schema:
+    description: Schema for benchmark tables (created if missing)
+    default: genie_code_benchmarks
+  warehouse_id:
+    description: SQL warehouse used by the dashboard (required; set per target or with --var / BUNDLE_VAR_warehouse_id)
+  billing_lag_hours:
+    description: Hours after the end of a run's last billed hour before its billing is treated as final
+    default: "6"
+  min_runs:
+    description: Valid engineer runs needed before a candidate is evaluated
+    default: "2"
+  max_spread_pct:
+    description: Runs further apart than this (as % of cost per unit) need one run beyond min_runs
+    default: "25"
+  min_improvement_pct:
+    description: How much cheaper per unit (%) a skill version must be to be published
+    default: "10"
+
+# No workspace or environment values are stored in this file. Pick the workspace with -p <profile>
+# (or DATABRICKS_CONFIG_PROFILE) and pass catalog / warehouse_id with --var or BUNDLE_VAR_<name>. See README.
+targets:
+  dev:
+    default: true
+    mode: development
+
+  # Example production target. Uncomment and fill in, then:
+  #   databricks bundle deploy -t prod -p <profile>
+  # prod:
+  #   mode: production
+  #   workspace:
+  #     host: https://<your-workspace-url>
+  #   variables:
+  #     catalog: <catalog>
+  #     warehouse_id: <warehouse_id>

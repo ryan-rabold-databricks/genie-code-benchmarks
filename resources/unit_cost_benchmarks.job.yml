@@ -1,0 +1,30 @@
+resources:
+  jobs:
+    unit_cost_benchmarks:
+      name: genie-code-unit-cost-benchmarks
+      description: >
+        Builds the Genie Code unit-cost benchmark tables, attributes Genie Code spend and turns
+        to logged benchmark runs, and publishes a new unit-cost version only when it is a
+        baseline or it lowers unit cost.
+      parameters:
+        - name: catalog
+          default: ${var.catalog}
+        - name: schema
+          default: ${var.schema}
+        - name: billing_lag_hours
+          default: ${var.billing_lag_hours}
+        - name: min_runs
+          default: ${var.min_runs}
+        - name: max_spread_pct
+          default: ${var.max_spread_pct}
+        - name: min_improvement_pct
+          default: ${var.min_improvement_pct}
+      tasks:
+        - task_key: setup
+          notebook_task:
+            notebook_path: ../src/notebooks/00_setup.py
+        - task_key: compute_and_publish
+          depends_on:
+            - task_key: setup
+          notebook_task:
+            notebook_path: ../src/notebooks/02_compute_and_publish.py

@@ -1,0 +1,43 @@
+digraph G {
+  graph [rankdir=TB, fontname="Helvetica", fontsize=22, bgcolor="white", pad=0.25, nodesep=0.35, ranksep=0.42, splines=spline, newrank=true,
+         label="Genie Code unit-cost benchmark: cost per dashboard widget\n ", labelloc=t, fontcolor="#00205B"];
+  node  [shape=box, style="rounded,filled", fontname="Helvetica", fontsize=17, color="#00205B", fillcolor="#FBF8F2", fontcolor="#00205B", penwidth=1.6, margin="0.12,0.06"];
+  edge  [fontname="Helvetica-Bold", fontsize=16, color="#007EB4", fontcolor="#007EB4", penwidth=1.8, arrowsize=0.9];
+
+  eng [label="Engineer", shape=ellipse, fillcolor="#00205B", fontcolor="white"];
+  wl  [label="benchmark_workloads\n(script_prompt)", shape=cylinder];
+
+  subgraph cluster_ws { label="Workspace: one clock hour per run"; style="rounded,dashed"; color="#8A98A8"; fontcolor="#5A6B7B"; fontsize=15;
+    dash [label="Dashboard (draft)\nAdd Widget - run N"];
+    gc   [label="Genie Code\nnew chat, effort Auto", fillcolor="#E6F2FB"];
+    nb   [label="Notebook\n01_log_benchmark_run"];
+  }
+  subgraph cluster_data { label="Captured automatically"; style="rounded"; color="#CC8500"; fontcolor="#CC8500"; fontsize=15;
+    bill [label="system.billing.usage\n(DBUs per user-hour)", shape=cylinder, fillcolor="#FFF6E5", color="#CC8500"];
+    ev   [label="assistant_events\n(turns)", shape=cylinder, fillcolor="#FFF6E5", color="#CC8500"];
+    runs [label="benchmark_runs\n(build log)", shape=cylinder];
+  }
+  subgraph cluster_job { label="Job: genie-code-unit-cost-benchmarks (after billing lands)"; style="rounded,filled"; color="#007EB4"; fillcolor="#F2F8FC"; fontcolor="#007EB4"; fontsize=15;
+    t1 [label="00_setup"]; t3 [label="02_compute_and_publish\ncost, turns, release gate"];
+  }
+  pub [label="unit_cost_benchmarks\nbenchmark_decisions\nbenchmark_run_results", shape=cylinder, fillcolor="#E5F3EC", color="#008759"];
+  out [label="AI/BI dashboard\nGenie Code Unit-Cost Benchmarks\ncost per widget", fillcolor="#00205B", fontcolor="white"];
+
+  {rank=same; eng; wl;}
+  {rank=same; dash; gc; nb;}  gc -> nb [style=invis];
+  {rank=same; bill; ev; runs;} bill -> ev -> runs [style=invis];
+  {rank=same; t1; t3;}
+  {rank=same; pub; out;}
+
+  eng -> dash [label="2 open"];
+  eng -> nb   [label="1 start"];
+  wl  -> nb   [label="prompt", style=dashed, color="#8A98A8", fontcolor="#8A98A8"];
+  dash -> gc  [label="3 build"];
+  gc -> bill  [style=dashed, color="#CC8500"];
+  gc -> ev    [style=dashed, color="#CC8500"];
+  nb -> runs  [label="4 end"];
+  bill -> t3 [label="5"]; ev -> t3; runs -> t3;
+  t1 -> t3 [color="#00205B"];
+  t3 -> pub [label="6 publish"];
+  pub -> out [label="7 review"];
+}

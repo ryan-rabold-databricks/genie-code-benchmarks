@@ -1,0 +1,8 @@
+resources:
+  dashboards:
+    unit_cost_dashboard:
+      display_name: Genie Code Unit-Cost Benchmarks
+      file_path: ../src/dashboards/unit_cost_benchmarks.lvdash.json
+      warehouse_id: ${var.warehouse_id}
+      dataset_catalog: ${var.catalog}
+      dataset_schema: ${var.schema}

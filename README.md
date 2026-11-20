@@ -177,6 +177,9 @@ src/dashboards/
 * Benchmarks are ratios for scripted work; real builds vary with requirements clarity. Re-baseline after each
   skill release or Genie Code model change (log new baseline runs; the latest one becomes the baseline once the last
   `min_runs` runs agree), then re-run any skill you still want to test, and compare business-user runs to engineer runs.
+* Upgrading from an earlier version renames `unit_cost_benchmarks.avg_cost_per_run` to `last_run_cost_usd`, which
+  turns on Delta column mapping for that table (a one-way protocol upgrade). Databricks readers are unaffected; check
+  any external Delta readers of that table first.
 * A published unit cost is one run's measurement. Keep `max_spread_pct` tight enough that a single outlier cannot pass
   the consistency check.
 

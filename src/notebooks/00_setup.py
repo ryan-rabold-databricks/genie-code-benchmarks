@@ -84,7 +84,7 @@ CREATE TABLE IF NOT EXISTS {fq}.unit_cost_benchmarks (
   skill_version       STRING,
   effort              STRING,
   n_runs              BIGINT,
-  avg_cost_per_run    DOUBLE COMMENT 'Cost of the most recent valid run (USD)',
+  last_run_cost_usd   DOUBLE COMMENT 'Cost of the most recent valid run (USD)',
   cost_per_unit_usd   DOUBLE,
   min_run_cost_per_unit DOUBLE COMMENT 'Cheapest of the last min_runs runs, cost per unit',
   max_run_cost_per_unit DOUBLE COMMENT 'Most expensive of the last min_runs runs, cost per unit',
@@ -102,6 +102,12 @@ CREATE TABLE IF NOT EXISTS {fq}.unit_cost_benchmarks (
 
 if "price_source" not in {f.name for f in spark.table(f"{fq}.unit_cost_benchmarks").schema}:
     spark.sql(f"ALTER TABLE {fq}.unit_cost_benchmarks ADD COLUMNS (price_source STRING COMMENT 'account, list, or mixed')")
+
+if "avg_cost_per_run" in {f.name for f in spark.table(f"{fq}.unit_cost_benchmarks").schema}:
+    # Unit costs moved from medians to the last valid run; renaming needs Delta column mapping (a one-way protocol upgrade)
+    spark.sql(f"ALTER TABLE {fq}.unit_cost_benchmarks SET TBLPROPERTIES ('delta.columnMapping.mode' = 'name')")
+    spark.sql(f"ALTER TABLE {fq}.unit_cost_benchmarks RENAME COLUMN avg_cost_per_run TO last_run_cost_usd")
+    spark.sql(f"ALTER TABLE {fq}.unit_cost_benchmarks ALTER COLUMN last_run_cost_usd COMMENT 'Cost of the most recent valid run (USD)'")
 
 spark.sql(f"""
 CREATE TABLE IF NOT EXISTS {fq}.benchmark_decisions (

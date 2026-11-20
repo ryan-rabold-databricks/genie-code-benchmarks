@@ -95,7 +95,7 @@ eng AS (
   SELECT workload_id, config, skill_version, effort,
          count(*) AS n_runs, sum(artifacts_produced) AS units,
          max(end_ts)                                 AS last_run_end,
-         max(cost_usd)     FILTER (WHERE rn = 1)     AS avg_cost_per_run,  -- last run's cost (column name kept)
+         max(cost_usd)     FILTER (WHERE rn = 1)     AS last_run_cost_usd,
          max(run_dbus_pu)  FILTER (WHERE rn = 1)     AS dbus_per_unit,
          max(run_cost_pu)  FILTER (WHERE rn = 1)     AS cost_per_unit_usd,
          max(run_turns_pu) FILTER (WHERE rn = 1)     AS turns_per_unit,
@@ -112,7 +112,7 @@ bu AS (
   FROM ok WHERE runner_type = 'business_user'
   GROUP BY ALL
 )
-SELECT e.workload_id, e.config, e.skill_version, e.effort, e.n_runs, e.last_run_end, e.avg_cost_per_run,
+SELECT e.workload_id, e.config, e.skill_version, e.effort, e.n_runs, e.last_run_end, e.last_run_cost_usd,
        e.cost_per_unit_usd, e.dbus_per_unit, e.turns_per_unit,
        e.min_run_cost_per_unit, e.max_run_cost_per_unit,
        (e.max_run_dbus_per_unit - e.min_run_dbus_per_unit) / nullif(e.dbus_per_unit, 0) * 100 AS spread_pct,
@@ -136,7 +136,7 @@ WHERE e.units > 0
 def bid(c):
     return f"{c['workload_id']}|{c['config']}|{c['skill_version'] or '-'}|{c['effort']}"
 
-METRICS = ["n_runs", "avg_cost_per_run", "cost_per_unit_usd", "min_run_cost_per_unit", "max_run_cost_per_unit", "spread_pct",
+METRICS = ["n_runs", "last_run_cost_usd", "cost_per_unit_usd", "min_run_cost_per_unit", "max_run_cost_per_unit", "spread_pct",
            "dbus_per_unit", "turns_per_unit", "units_per_100_usd", "business_user_multiplier"]
 FIELDS = METRICS + ["price_source"]
 
@@ -283,7 +283,7 @@ for key, cands in groups.items():
 
 pub_cols = ["benchmark_id", "workload_id", "config", "skill_version", "effort"] + FIELDS + ["is_current", "_metrics_changed"]
 pub_schema = ("benchmark_id string, workload_id string, config string, skill_version string, effort string, n_runs bigint, "
-              "avg_cost_per_run double, cost_per_unit_usd double, min_run_cost_per_unit double, max_run_cost_per_unit double, "
+              "last_run_cost_usd double, cost_per_unit_usd double, min_run_cost_per_unit double, max_run_cost_per_unit double, "
               "spread_pct double, dbus_per_unit double, turns_per_unit double, units_per_100_usd double, "
               "business_user_multiplier double, price_source string, is_current boolean, metrics_changed boolean")
 if writes:
@@ -291,7 +291,7 @@ if writes:
         .createOrReplaceTempView("to_publish")
     spark.sql(f"""
     MERGE INTO {fq}.unit_cost_benchmarks t USING to_publish s ON t.benchmark_id = s.benchmark_id
-    WHEN MATCHED THEN UPDATE SET n_runs = s.n_runs, avg_cost_per_run = s.avg_cost_per_run,
+    WHEN MATCHED THEN UPDATE SET n_runs = s.n_runs, last_run_cost_usd = s.last_run_cost_usd,
       cost_per_unit_usd = s.cost_per_unit_usd, min_run_cost_per_unit = s.min_run_cost_per_unit,
       max_run_cost_per_unit = s.max_run_cost_per_unit, spread_pct = s.spread_pct, dbus_per_unit = s.dbus_per_unit,
       turns_per_unit = s.turns_per_unit, units_per_100_usd = s.units_per_100_usd,
@@ -300,10 +300,10 @@ if writes:
       is_current = s.is_current,
       -- superseded_at marks the moment a current benchmark stopped being current; never-current rows stay NULL
       superseded_at = CASE WHEN s.is_current THEN NULL WHEN t.is_current THEN current_timestamp() ELSE t.superseded_at END
-    WHEN NOT MATCHED THEN INSERT (benchmark_id, workload_id, config, skill_version, effort, n_runs, avg_cost_per_run,
+    WHEN NOT MATCHED THEN INSERT (benchmark_id, workload_id, config, skill_version, effort, n_runs, last_run_cost_usd,
       cost_per_unit_usd, min_run_cost_per_unit, max_run_cost_per_unit, spread_pct, dbus_per_unit, turns_per_unit,
       units_per_100_usd, business_user_multiplier, price_source, published_at, is_current, superseded_at)
-    VALUES (s.benchmark_id, s.workload_id, s.config, s.skill_version, s.effort, s.n_runs, s.avg_cost_per_run,
+    VALUES (s.benchmark_id, s.workload_id, s.config, s.skill_version, s.effort, s.n_runs, s.last_run_cost_usd,
       s.cost_per_unit_usd, s.min_run_cost_per_unit, s.max_run_cost_per_unit, s.spread_pct, s.dbus_per_unit,
       s.turns_per_unit, s.units_per_100_usd, s.business_user_multiplier, s.price_source, current_timestamp(), s.is_current,
       NULL)

@@ -5,7 +5,7 @@ resources:
       description: >
         Builds the Genie Code unit-cost benchmark tables, attributes Genie Code spend and turns
         to logged benchmark runs, and publishes a new unit-cost version only when it is a
-        baseline or it lowers unit cost.
+        baseline or it uses at least min_improvement_pct fewer DBUs per unit.
       parameters:
         - name: catalog
           default: ${var.catalog}

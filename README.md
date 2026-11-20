@@ -13,8 +13,10 @@ It covers the first two phases of a Genie Code cost program: measure first, then
   per user, per hour (`usage_metadata.genie.surface = 'GENIE_CODE'`). So cost per artifact can only be measured by
   running **scripted builds in isolated user-hours** and dividing cost by units produced. Billing and events are
   filtered to the workspace the run was logged in, so the runner's Genie Code use in other workspaces is not counted.
-* **Unit cost is the median** of per-run DBUs per unit (likewise cost and turns per unit), so one outlier run
-  cannot move a benchmark.
+* **Unit cost is the most recent valid run's** DBUs, cost, and turns per unit, so a re-measurement (for example
+  after a Genie Code model change) replaces the old number instead of being averaged with older runs. Earlier runs
+  are used only as a consistency check: a candidate needs `min_runs` valid runs, and its last `min_runs` runs must
+  agree within `max_spread_pct`, so one outlier run is never published.
 * **Turns** come from `system.access.assistant_events` (one row per user message).
 * **Prices come from the system tables.** Each billing row is priced at its usage time from
   `system.billing.account_prices` (your account's price), else `system.billing.list_prices`; `price_source` on each
@@ -24,7 +26,8 @@ It covers the first two phases of a Genie Code cost program: measure first, then
 * **The release gate compares DBUs per unit**, so a price change never looks like a re-measurement or flips a
   decision; dollars are reported alongside. A skill version is published (and should be released) only if it uses at
   least `min_improvement_pct` fewer DBUs per unit than the cheapest published benchmark. A skill with no baseline is
-  skipped: measure first. Current changes only when another published benchmark is at least `min_improvement_pct`
+  skipped: measure first. A skill version is compared only if its last run is newer than the last baseline run, so an old skill measurement is never released against a re-measured baseline.
+  Current changes only when another published benchmark is at least `min_improvement_pct`
   cheaper, so run-to-run noise cannot flip it.
 
 ## Architecture
@@ -74,12 +77,13 @@ It covers the first two phases of a Genie Code cost program: measure first, then
 | `REJECT_NO_IMPROVEMENT` | Skill version does not use at least `min_improvement_pct` fewer DBUs per unit (do not release) |
 | `SKIP_NO_BASELINE` | Skill tested before any baseline exists |
 | `SKIP_INSUFFICIENT_RUNS` | Fewer than `min_runs` valid engineer runs |
-| `SKIP_HIGH_SPREAD` | Runs disagree: (highest - lowest run DBUs per unit) / median is above `max_spread_pct`. Log one more run than `min_runs`, so the median is not set by the outlier |
+| `SKIP_HIGH_SPREAD` | The last `min_runs` runs disagree: (highest - lowest DBUs per unit) / the last run's DBUs per unit is above `max_spread_pct`. Log another run; the published numbers stay as they were until the last runs agree |
+| `SKIP_STALE_SKILL` | The skill version's last run is not newer than the last baseline run (for example, the baseline was re-measured after the skill was tested). Re-run the skill |
 | `REFRESHED` | A published benchmark (current or superseded, including the baseline) was re-measured; its numbers are updated |
 | `CURRENT_CHANGED` | After a refresh, another published benchmark is at least `min_improvement_pct` cheaper (DBUs per unit) than the current one and becomes current (for example, a released skill re-measured well above the baseline) |
 
 Business-user runs on the same config do not change the published engineer benchmark. They produce a
-`business_user_multiplier` (business-user cost per unit / engineer cost per unit) to size tier budgets.
+`business_user_multiplier` (last business-user run's DBUs per unit / last engineer run's DBUs per unit) to size tier budgets.
 
 ## Prerequisites
 
@@ -133,8 +137,8 @@ with `--var name=value`, or with `BUNDLE_VAR_<name>` environment variables:
 | `warehouse_id` | required | Warehouse for the dashboard |
 | `billing_lag_hours` | `6` | Hours after the end of a run's last billed hour before its billing is treated as final |
 | `min_runs` | `2` | Valid engineer runs needed before a candidate is evaluated |
-| `max_spread_pct` | `25` | Runs further apart than this (as % of cost per unit) need one run beyond `min_runs` |
-| `min_improvement_pct` | `10` | How much cheaper per unit a skill version must be to be published |
+| `max_spread_pct` | `25` | If the last `min_runs` runs differ by more than this (% of the last run's DBUs per unit), log another run before publishing |
+| `min_improvement_pct` | `10` | How many % fewer DBUs per unit a skill version must use to be published |
 
 The `max_spread_pct` and `min_improvement_pct` defaults are starting points, not measured values. Tune them once
 real runs show how much Genie Code cost varies; keep `min_improvement_pct` above the typical run-to-run spread so
@@ -164,14 +168,17 @@ src/dashboards/
 | `v_benchmark_run_costs` | View: per-run DBUs, turns, noise turns, overlaps |
 | `benchmark_run_results` | Per-run snapshot with status (rewritten each job run) |
 | `unit_cost_benchmarks` | One row per published benchmark version; `is_current` marks the active one |
-| `benchmark_decisions` | Append-only audit trail. A row is added only when a decision differs from that candidate's latest row for the same decision, so re-running the job adds nothing |
+| `benchmark_decisions` | Append-only audit trail. A row is added only when it differs from that candidate's latest row (any decision), so re-running the job with the same runs adds nothing |
 
 ## Limitations
 
 * Attribution is per user-hour within one workspace. Runs must be isolated; the job flags but cannot fix contaminated hours.
 * The dashboard is empty until the first runs clear `billing_lag_hours` and the job runs again.
 * Benchmarks are ratios for scripted work; real builds vary with requirements clarity. Re-baseline after each
-  skill release and compare business-user runs to engineer runs.
+  skill release or Genie Code model change (log new baseline runs; the latest one becomes the baseline once the last
+  `min_runs` runs agree), then re-run any skill you still want to test, and compare business-user runs to engineer runs.
+* A published unit cost is one run's measurement. Keep `max_spread_pct` tight enough that a single outlier cannot pass
+  the consistency check.
 
 ## Disclaimer
 

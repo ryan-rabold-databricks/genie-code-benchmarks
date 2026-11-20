@@ -5,16 +5,20 @@
 # MAGIC 1. **Attribute** Genie Code DBUs, cost, and turns to each logged run (`v_benchmark_run_costs`) and give
 # MAGIC    every run a status. Only `valid` runs count. Cost is priced from the system tables (account price,
 # MAGIC    else list price); free-allowance usage is priced at the workspace's paid Genie Code rate.
-# MAGIC 2. **Aggregate** engineer runs into a candidate per workload, config, skill version, and effort.
-# MAGIC    DBUs, cost, and turns per unit are the **median** of per-run values, so one outlier run cannot move them.
-# MAGIC    Business-user runs on the same config produce a `business_user_multiplier`.
+# MAGIC 2. **Candidates**: engineer runs grouped per workload, config, skill version, and effort.
+# MAGIC    DBUs, cost, and turns per unit are those of the **most recent valid run** (latest `end_ts`), so a
+# MAGIC    re-measurement replaces the old number instead of being averaged with it. Older runs are only used to
+# MAGIC    check consistency. The last business-user run on the same config gives a `business_user_multiplier`.
 # MAGIC 3. **Gate and publish**, per workload and effort level. All comparisons use **DBUs per unit**, so price
 # MAGIC    changes never look like re-measurements or flip a decision; dollars are for reporting.
-# MAGIC    * Candidates need `min_runs` valid runs. Runs that disagree (per-run DBUs per unit spread above
-# MAGIC      `max_spread_pct`) need one more, so the median is not set by an outlier.
+# MAGIC    * Candidates need `min_runs` valid runs, and their last `min_runs` runs must agree: if their DBUs per
+# MAGIC      unit spread is above `max_spread_pct` of the last run's, log another run, so one outlier run is never published.
 # MAGIC    * Published benchmarks (baseline or released skill, current or not) that were re-measured are
 # MAGIC      **refreshed first**, so every comparison below uses fresh numbers. This is how re-baselining works.
 # MAGIC    * First baseline: published (measure first). A skill version with no baseline: skipped.
+# MAGIC    * A skill version is only compared if its last run is newer than the last baseline run
+# MAGIC      (`SKIP_STALE_SKILL` otherwise), so an old skill measurement is never released against a re-measured
+# MAGIC      baseline. Re-run the skill after re-baselining.
 # MAGIC    * A new skill version is published (release the skill) only if it uses at least `min_improvement_pct`
 # MAGIC      fewer DBUs per unit than the cheapest published benchmark; otherwise it is rejected.
 # MAGIC    * Current changes only when another published benchmark is at least `min_improvement_pct` cheaper than
@@ -76,29 +80,39 @@ display(spark.sql(f"SELECT status, count(*) runs FROM {fq}.benchmark_run_results
 # COMMAND ----------
 
 candidates = spark.sql(f"""
-WITH ok AS (SELECT * FROM {fq}.benchmark_run_results WHERE status = 'valid'),
--- Unit metrics are the MEDIAN of per-run values, so one outlier run cannot move the benchmark
+WITH ok AS (
+  -- rn = 1 is the most recent valid run of each workload, config, skill version, effort, and runner type
+  -- DOUBLE: billing DBUs are DECIMAL, and the gate compares them in Python with the published DOUBLE values
+  SELECT *, CAST(dbus / nullif(artifacts_produced, 0) AS DOUBLE)     AS run_dbus_pu,
+         CAST(cost_usd / nullif(artifacts_produced, 0) AS DOUBLE)    AS run_cost_pu,
+         CAST(turns / nullif(artifacts_produced, 0) AS DOUBLE)       AS run_turns_pu,
+         row_number() OVER (PARTITION BY workload_id, config, skill_version, effort, runner_type
+                            ORDER BY end_ts DESC, run_id DESC) AS rn
+  FROM {fq}.benchmark_run_results WHERE status = 'valid'
+),
+-- Unit metrics are the LAST valid run's. The last {min_runs} runs (the consistency window) give the spread.
 eng AS (
   SELECT workload_id, config, skill_version, effort,
-         count(*) AS n_runs, avg(cost_usd) AS avg_cost_per_run, sum(artifacts_produced) AS units,
-         percentile(dbus     / nullif(artifacts_produced, 0), 0.5) AS dbus_per_unit,
-         percentile(cost_usd / nullif(artifacts_produced, 0), 0.5) AS cost_per_unit_usd,
-         percentile(turns    / nullif(artifacts_produced, 0), 0.5) AS turns_per_unit,
-         min(dbus / nullif(artifacts_produced, 0)) AS min_run_dbus_per_unit,
-         max(dbus / nullif(artifacts_produced, 0)) AS max_run_dbus_per_unit,
-         min(cost_usd / nullif(artifacts_produced, 0)) AS min_run_cost_per_unit,
-         max(cost_usd / nullif(artifacts_produced, 0)) AS max_run_cost_per_unit,
-         CASE WHEN count(DISTINCT price_source) = 1 THEN max(price_source) ELSE 'mixed' END AS price_source
+         count(*) AS n_runs, sum(artifacts_produced) AS units,
+         max(end_ts)                                 AS last_run_end,
+         max(cost_usd)     FILTER (WHERE rn = 1)     AS avg_cost_per_run,  -- last run's cost (column name kept)
+         max(run_dbus_pu)  FILTER (WHERE rn = 1)     AS dbus_per_unit,
+         max(run_cost_pu)  FILTER (WHERE rn = 1)     AS cost_per_unit_usd,
+         max(run_turns_pu) FILTER (WHERE rn = 1)     AS turns_per_unit,
+         max(price_source) FILTER (WHERE rn = 1)     AS price_source,
+         min(run_dbus_pu)  FILTER (WHERE rn <= {min_runs}) AS min_run_dbus_per_unit,
+         max(run_dbus_pu)  FILTER (WHERE rn <= {min_runs}) AS max_run_dbus_per_unit,
+         min(run_cost_pu)  FILTER (WHERE rn <= {min_runs}) AS min_run_cost_per_unit,
+         max(run_cost_pu)  FILTER (WHERE rn <= {min_runs}) AS max_run_cost_per_unit
   FROM ok WHERE runner_type = 'engineer'
   GROUP BY ALL
 ),
 bu AS (
-  SELECT workload_id, config, skill_version, effort,
-         percentile(dbus / nullif(artifacts_produced, 0), 0.5) AS bu_dbus_per_unit
+  SELECT workload_id, config, skill_version, effort, max(run_dbus_pu) FILTER (WHERE rn = 1) AS bu_dbus_per_unit
   FROM ok WHERE runner_type = 'business_user'
   GROUP BY ALL
 )
-SELECT e.workload_id, e.config, e.skill_version, e.effort, e.n_runs, e.avg_cost_per_run,
+SELECT e.workload_id, e.config, e.skill_version, e.effort, e.n_runs, e.last_run_end, e.avg_cost_per_run,
        e.cost_per_unit_usd, e.dbus_per_unit, e.turns_per_unit,
        e.min_run_cost_per_unit, e.max_run_cost_per_unit,
        (e.max_run_dbus_per_unit - e.min_run_dbus_per_unit) / nullif(e.dbus_per_unit, 0) * 100 AS spread_pct,
@@ -151,9 +165,9 @@ def not_ready(c):
     """Decision if the candidate does not have enough consistent runs yet, else None."""
     if c["n_runs"] < min_runs:
         return decide(c, "SKIP_INSUFFICIENT_RUNS", f"{c['n_runs']} valid runs; need {min_runs}")
-    if (c["spread_pct"] or 0) > max_spread_pct and c["n_runs"] < min_runs + 1:
-        return decide(c, "SKIP_HIGH_SPREAD", f"Runs differ by {c['spread_pct']:.0f}% of DBUs per unit (limit {max_spread_pct:.0f}%); "
-                                             f"log {min_runs + 1 - c['n_runs']} more run(s)")
+    if (c["spread_pct"] or 0) > max_spread_pct:
+        return decide(c, "SKIP_HIGH_SPREAD", f"Last {min_runs} runs differ by {c['spread_pct']:.0f}% of the last run's DBUs per unit "
+                                             f"(limit {max_spread_pct:.0f}%); log another run")
     return None
 
 def units(r):
@@ -163,6 +177,7 @@ existing = {r["benchmark_id"]: r.asDict() for r in spark.table(f"{fq}.unit_cost_
 writes = {}     # benchmark_id -> row to upsert; "_metrics_changed" marks re-measured rows
 decisions = []
 
+last_run_end = {bid(c): c["last_run_end"] for c in candidates}  # per benchmark id, for the stale-skill check
 groups = {}
 for c in candidates:
     groups.setdefault((c["workload_id"], c["effort"]), []).append(c.asDict())
@@ -218,6 +233,13 @@ for key, cands in groups.items():
             continue
         if baseline_id not in pub:
             decisions.append(decide(c, "SKIP_NO_BASELINE", "Measure the baseline before testing a skill"))
+            continue
+        # Checked against the baseline (refreshed above), not the cheapest benchmark, so the result does not depend
+        # on which skills were published earlier in this run
+        base_end = last_run_end.get(baseline_id)
+        if base_end is not None and c["last_run_end"] <= base_end:
+            decisions.append(decide(c, "SKIP_STALE_SKILL", f"Last skill run ({c['last_run_end']:%Y-%m-%d %H:%M} UTC) is not newer than "
+                                                           f"the last baseline run ({base_end:%Y-%m-%d %H:%M} UTC); re-run the skill"))
             continue
         best = min(pub.values(), key=dbu)
         delta = pct_change(dbu(c), dbu(best))

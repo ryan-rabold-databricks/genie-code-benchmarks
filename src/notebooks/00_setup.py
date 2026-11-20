@@ -84,12 +84,12 @@ CREATE TABLE IF NOT EXISTS {fq}.unit_cost_benchmarks (
   skill_version       STRING,
   effort              STRING,
   n_runs              BIGINT,
-  avg_cost_per_run    DOUBLE,
+  avg_cost_per_run    DOUBLE COMMENT 'Cost of the most recent valid run (USD)',
   cost_per_unit_usd   DOUBLE,
-  min_run_cost_per_unit DOUBLE COMMENT 'Cheapest single run, cost per unit',
-  max_run_cost_per_unit DOUBLE COMMENT 'Most expensive single run, cost per unit',
-  spread_pct          DOUBLE COMMENT '(max - min run DBUs per unit) / median DBUs per unit * 100',
-  dbus_per_unit       DOUBLE COMMENT 'Median DBUs per unit; the release gate compares this',
+  min_run_cost_per_unit DOUBLE COMMENT 'Cheapest of the last min_runs runs, cost per unit',
+  max_run_cost_per_unit DOUBLE COMMENT 'Most expensive of the last min_runs runs, cost per unit',
+  spread_pct          DOUBLE COMMENT '(max - min DBUs per unit over the last min_runs runs) / last run DBUs per unit * 100',
+  dbus_per_unit       DOUBLE COMMENT 'DBUs per unit of the most recent valid run; the release gate compares this',
   turns_per_unit      DOUBLE,
   units_per_100_usd   DOUBLE,
   business_user_multiplier DOUBLE COMMENT 'Business-user DBUs per unit / engineer DBUs per unit (null if no business-user runs)',
@@ -116,7 +116,7 @@ CREATE TABLE IF NOT EXISTS {fq}.benchmark_decisions (
   current_config            STRING,
   current_cost_per_unit     DOUBLE,
   delta_pct                 DOUBLE,
-  decision                  STRING COMMENT 'PUBLISH_BASELINE, PUBLISH_IMPROVED, REFRESHED, CURRENT_CHANGED, REJECT_NO_IMPROVEMENT, SKIP_INSUFFICIENT_RUNS, SKIP_HIGH_SPREAD, SKIP_NO_BASELINE',
+  decision                  STRING COMMENT 'PUBLISH_BASELINE, PUBLISH_IMPROVED, REFRESHED, CURRENT_CHANGED, REJECT_NO_IMPROVEMENT, SKIP_INSUFFICIENT_RUNS, SKIP_HIGH_SPREAD, SKIP_NO_BASELINE, SKIP_STALE_SKILL',
   reason                    STRING
 ) COMMENT 'Why each benchmark candidate was published or rejected'
 """)

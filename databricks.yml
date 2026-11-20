@@ -19,10 +19,10 @@ variables:
     description: Valid engineer runs needed before a candidate is evaluated
     default: "2"
   max_spread_pct:
-    description: Runs further apart than this (as % of cost per unit) need one run beyond min_runs
+    description: If the last min_runs runs differ by more than this (% of the last run's DBUs per unit), log another run before publishing
     default: "25"
   min_improvement_pct:
-    description: How much cheaper per unit (%) a skill version must be to be published
+    description: How many % fewer DBUs per unit a skill version must use to be published
     default: "10"
 
 # No workspace or environment values are stored in this file. Pick the workspace with -p <profile>

@@ -89,7 +89,7 @@
             "name": "subtitle",
             "multilineTextboxSpec": {
               "lines": [
-                "Cost per unit for standard workloads, measured with scripted runs. A skill version is published (and released) only if it lowers cost per unit."
+                "Cost per unit for standard workloads, measured with scripted runs. Each unit cost is the most recent valid run. A skill version is published (and released) only if it uses at least min_improvement_pct (default 10%) fewer DBUs per unit than the cheapest published benchmark."
               ]
             }
           },
@@ -726,7 +726,7 @@
                 "showTitle": true,
                 "title": "Release gate",
                 "showDescription": true,
-                "description": "Each candidate is published only as a first baseline or when it lowers cost per unit"
+                "description": "Each candidate is published only as a first baseline or when it uses at least min_improvement_pct fewer DBUs per unit"
               }
             }
           },

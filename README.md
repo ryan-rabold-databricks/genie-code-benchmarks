@@ -97,6 +97,10 @@ Business-user runs on the same config do not change the published engineer bench
 ## Deploy and run
 
 ```bash
+# Clone the repo; run every bundle command from its root (the folder that contains databricks.yml)
+git clone https://github.com/ryan-rabold-databricks/genie-code-benchmarks.git
+cd genie-code-benchmarks
+
 # 0. Point at your workspace and supply the required values (nothing environment-specific is committed)
 export DATABRICKS_CONFIG_PROFILE=<profile>
 export BUNDLE_VAR_catalog=<catalog>
